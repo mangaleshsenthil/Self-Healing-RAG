@@ -1,0 +1,352 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>Self-Healing RAG</title>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600&family=Syne:wght@400;600;800&display=swap" rel="stylesheet"/>
+<style>
+:root{--bg:#0a0a0f;--surface:#111118;--surface2:#16161f;--border:#1e1e2e;--accent:#7c6af7;--accent2:#3ecfcf;--pass:#22d37a;--fail:#ff5e5e;--warn:#f0b030;--text:#e8e8f0;--muted:#5a5a7a;--mono:'JetBrains Mono',monospace;--sans:'Syne',sans-serif;--sidebar:260px}
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+body{background:var(--bg);color:var(--text);font-family:var(--sans);height:100vh;display:flex;overflow:hidden}
+.sidebar{width:var(--sidebar);background:var(--surface);border-right:1px solid var(--border);display:flex;flex-direction:column;flex-shrink:0;height:100vh}
+.sidebar-header{padding:20px 16px 12px;border-bottom:1px solid var(--border)}
+.sidebar-title{font-size:13px;font-weight:800;background:linear-gradient(135deg,#fff 30%,var(--accent) 100%);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;margin-bottom:12px}
+.new-chat-btn{width:100%;background:var(--accent);border:none;border-radius:8px;color:#fff;font-family:var(--sans);font-size:13px;font-weight:600;padding:9px 14px;cursor:pointer;display:flex;align-items:center;gap:8px;transition:opacity .2s}
+.new-chat-btn:hover{opacity:.85}
+.sessions-list{flex:1;overflow-y:auto;padding:8px}
+.sessions-list::-webkit-scrollbar{width:4px}
+.sessions-list::-webkit-scrollbar-thumb{background:var(--border);border-radius:2px}
+.session-item{padding:10px 12px;border-radius:8px;cursor:pointer;transition:background .15s;margin-bottom:2px;position:relative}
+.session-item:hover{background:rgba(124,106,247,.08)}
+.session-item.active{background:rgba(124,106,247,.15)}
+.session-title{font-size:13px;font-weight:600;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-bottom:3px}
+.session-meta{font-family:var(--mono);font-size:10px;color:var(--muted)}
+.session-delete{position:absolute;right:8px;top:50%;transform:translateY(-50%);background:none;border:none;color:var(--muted);cursor:pointer;opacity:0;transition:opacity .15s;font-size:14px;padding:4px}
+.session-item:hover .session-delete{opacity:1}
+.session-delete:hover{color:var(--fail)}
+.main{flex:1;display:flex;flex-direction:column;height:100vh;overflow:hidden}
+.chat-header{padding:16px 24px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:12px;background:var(--surface);flex-shrink:0}
+.chat-header-title{font-size:15px;font-weight:600;color:var(--text);flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.model-badge{font-family:var(--mono);font-size:10px;color:var(--accent);border:1px solid rgba(124,106,247,.3);padding:3px 8px;border-radius:4px}
+/* Always-centered chat body */
+.chat-body{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;overflow:hidden;padding:24px 0 32px}
+.chat-inner{width:100%;max-width:760px;padding:0 24px;display:flex;flex-direction:column;gap:16px}
+.messages{width:100%;max-height:45vh;overflow-y:auto;display:flex;flex-direction:column;gap:20px;padding-right:4px}
+.messages::-webkit-scrollbar{width:4px}
+.messages::-webkit-scrollbar-thumb{background:var(--border);border-radius:2px}
+.empty-state{display:flex;flex-direction:column;align-items:center;gap:12px;color:var(--muted);text-align:center;padding:0 0 8px}
+.empty-icon{font-size:40px;margin-bottom:8px}
+.empty-title{font-size:18px;font-weight:700;color:var(--text)}
+.empty-sub{font-family:var(--mono);font-size:12px;line-height:1.7}
+.suggestions{display:flex;flex-wrap:wrap;gap:8px;justify-content:center;margin-top:16px}
+.suggestion-pill{background:var(--surface);border:1px solid var(--border);border-radius:20px;color:var(--text);font-size:12px;padding:7px 14px;cursor:pointer;transition:border-color .2s,background .2s;font-family:var(--mono)}
+.suggestion-pill:hover{border-color:var(--accent);background:rgba(124,106,247,.08)}
+.msg-row{display:flex;flex-direction:column;gap:6px;animation:slideUp .3s ease both}
+.msg-row.user{align-items:flex-end}
+.msg-row.assistant{align-items:flex-start}
+.msg-bubble{max-width:75%;padding:12px 16px;border-radius:14px;font-size:14px;line-height:1.7}
+.msg-row.user .msg-bubble{background:var(--accent);color:#fff;border-bottom-right-radius:4px}
+.msg-row.assistant .msg-bubble{background:var(--surface2);border:1px solid var(--border);color:var(--text);border-bottom-left-radius:4px}
+.msg-meta{font-family:var(--mono);font-size:10px;color:var(--muted);display:flex;align-items:center;gap:8px;padding:0 4px}
+.intent-tag{padding:2px 7px;border-radius:3px;font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.06em}
+.intent-qa{background:rgba(62,207,207,.12);color:var(--accent2)}
+.intent-code{background:rgba(124,106,247,.12);color:var(--accent)}
+.pipeline-toggle{display:none}
+.p-label{font-family:var(--mono);font-size:10px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);margin-bottom:8px;display:flex;align-items:center;gap:6px}
+.verdict-badge{font-size:9px;font-weight:700;padding:2px 7px;border-radius:3px;text-transform:uppercase}
+.verdict-pass{background:rgba(34,211,122,.15);color:var(--pass)}
+.verdict-fail{background:rgba(255,94,94,.15);color:var(--fail)}
+.chunk-item{background:var(--bg);border-left:2px solid var(--accent);border-radius:4px;padding:7px 10px;font-family:var(--mono);font-size:11px;color:#b0b0cc;line-height:1.5;margin-bottom:6px}
+.code-block{background:#0d0d14;border-radius:6px;padding:10px 12px;font-family:var(--mono);font-size:11px;color:#c8d0e8;white-space:pre;overflow-x:auto;line-height:1.6}
+.output-block{background:#0a120a;border:1px solid rgba(34,211,122,.15);border-radius:6px;padding:8px 12px;font-family:var(--mono);font-size:12px;color:var(--pass);white-space:pre-wrap}
+.attempt-item{border:1px solid var(--border);border-radius:6px;margin-bottom:6px;overflow:hidden}
+.attempt-hdr{display:flex;justify-content:space-between;align-items:center;padding:8px 12px;background:var(--bg);cursor:pointer;font-family:var(--mono);font-size:11px;color:var(--muted);border:none;width:100%;text-align:left}
+.attempt-body{padding:10px 12px;display:none}
+.attempt-body.open{display:block}
+.typing-indicator{display:flex;align-items:center;gap:10px;padding:12px 16px;background:var(--surface2);border:1px solid var(--border);border-radius:14px;border-bottom-left-radius:4px;width:fit-content;animation:slideUp .3s ease both}
+.typing-dots{display:flex;gap:4px}
+.typing-dots span{width:6px;height:6px;background:var(--muted);border-radius:50%;animation:bounce 1.2s infinite}
+.typing-dots span:nth-child(2){animation-delay:.2s}
+.typing-dots span:nth-child(3){animation-delay:.4s}
+.typing-label{font-family:var(--mono);font-size:11px;color:var(--muted)}
+.input-bar{width:100%;flex-shrink:0}
+.input-row{display:flex;gap:10px;align-items:flex-end;background:var(--bg);border:1px solid var(--border);border-radius:12px;padding:10px 12px;transition:border-color .2s}
+.input-row:focus-within{border-color:var(--accent)}
+textarea#chatInput{flex:1;background:transparent;border:none;color:var(--text);font-family:var(--sans);font-size:14px;resize:none;outline:none;line-height:1.6;min-height:24px;max-height:160px;overflow-y:auto}
+textarea#chatInput::placeholder{color:var(--muted)}
+.send-btn{background:var(--accent);border:none;border-radius:8px;color:#fff;width:36px;height:36px;cursor:pointer;display:flex;align-items:center;justify-content:center;flex-shrink:0;transition:opacity .2s}
+.send-btn:hover:not(:disabled){opacity:.85}
+.send-btn:disabled{opacity:.35;cursor:not-allowed}
+.send-btn svg{width:15px;height:15px}
+.stop-btn{background:transparent;border:1px solid var(--fail);border-radius:8px;color:var(--fail);width:36px;height:36px;cursor:pointer;display:none;align-items:center;justify-content:center;flex-shrink:0;transition:all .2s}
+.stop-btn:hover{background:rgba(255,94,94,.12)}
+.stop-btn.visible{display:flex}
+.stop-btn svg{width:13px;height:13px}
+.input-hint{font-family:var(--mono);font-size:10px;color:var(--muted);margin-top:8px;text-align:center}
+@keyframes slideUp{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:translateY(0)}}
+@keyframes bounce{0%,60%,100%{transform:translateY(0)}30%{transform:translateY(-5px)}}
+@keyframes spin{to{transform:rotate(360deg)}}
+</style>
+</head>
+<body>
+<div class="sidebar">
+  <div class="sidebar-header">
+    <div class="sidebar-title">&#x1F9E0; Self-Healing RAG</div>
+    <button class="new-chat-btn" onclick="newChat()">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+      New Chat
+    </button>
+  </div>
+  <div class="sessions-list" id="sessionsList"></div>
+</div>
+<div class="main">
+  <div class="chat-header">
+    <div class="chat-header-title" id="chatTitle">Select or start a chat</div>
+    <div class="model-badge">qwen2.5-coder:7b &middot; FAISS</div>
+  </div>
+  <div class="chat-body" id="chatBody">
+    <div class="chat-inner">
+      <div class="messages" id="messages">
+        <div class="empty-state" id="emptyState">
+          <div class="empty-icon">&#x1F9E0;</div>
+          <div class="empty-title">Self-Healing RAG</div>
+          <div class="empty-sub">Ask anything &mdash; Q&amp;A uses RAG + critic.<br>Coding tasks auto-detect and self-heal.</div>
+          <div class="suggestions">
+            <div class="suggestion-pill" onclick="suggest('What is machine learning?')">What is machine learning?</div>
+            <div class="suggestion-pill" onclick="suggest('Write a Python fibonacci sequence')">Python fibonacci sequence</div>
+            <div class="suggestion-pill" onclick="suggest('How does DNA replication work?')">How does DNA replication work?</div>
+            <div class="suggestion-pill" onclick="suggest('Write a function to reverse a string')">Reverse a string</div>
+          </div>
+        </div>
+      </div>
+      <div class="input-bar">
+        <div class="input-row">
+          <textarea id="chatInput" rows="1" placeholder="Ask anything or describe a coding task&hellip;"></textarea>
+          <button class="stop-btn" id="stopBtn" title="Stop generation" onclick="stopGeneration()">
+            <svg viewBox="0 0 24 24" fill="currentColor"><rect x="4" y="4" width="16" height="16" rx="2"/></svg>
+          </button>
+          <button class="send-btn" id="sendBtn" onclick="sendMessage()">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
+          </button>
+        </div>
+        <div class="input-hint">Enter to send &middot; Shift+Enter for new line &middot; Auto-detects Q&amp;A vs Code</div>
+      </div>
+    </div>
+  </div>
+</div>
+<script>
+const API = '';
+let currentSession = null;
+let currentAbortCtrl = null;
+
+const ta = document.getElementById('chatInput');
+const sendBtn = document.getElementById('sendBtn');
+const stopBtn = document.getElementById('stopBtn');
+
+function setLoading(on) {
+  sendBtn.disabled = on;
+  if (on) stopBtn.classList.add('visible');
+  else     stopBtn.classList.remove('visible');
+}
+
+function stopGeneration() {
+  // 1. Tell the backend to stop the pipeline (fire-and-forget)
+  if (currentSession) {
+    fetch(API + '/cancel/' + currentSession.id, { method: 'POST' }).catch(() => {});
+  }
+  // 2. Abort the in-flight fetch so the UI responds immediately
+  if (currentAbortCtrl) {
+    currentAbortCtrl.abort();
+    currentAbortCtrl = null;
+  }
+}
+ta.addEventListener('input', () => { ta.style.height = 'auto'; ta.style.height = Math.min(ta.scrollHeight, 160) + 'px'; });
+ta.addEventListener('keydown', e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); } });
+
+function suggest(text) {
+  ta.value = text;
+  ta.dispatchEvent(new Event('input'));
+  if (!currentSession) newChat().then(() => sendMessage());
+  else sendMessage();
+}
+
+async function loadSessions() {
+  try {
+    const res = await fetch(API + '/sessions');
+    renderSessions(await res.json());
+  } catch {}
+}
+
+function renderSessions(list) {
+  const el = document.getElementById('sessionsList');
+  if (!list.length) { el.innerHTML = '<div style="padding:16px;font-family:var(--mono);font-size:11px;color:var(--muted);text-align:center">No chats yet</div>'; return; }
+  el.innerHTML = list.map(s => `<div class="session-item ${currentSession&&currentSession.id===s.id?'active':''}" onclick="loadSession('${s.id}')"><div class="session-title">${escHtml(s.title)}</div><div class="session-meta">${s.message_count} msgs &middot; ${timeAgo(s.updated_at)}</div><button class="session-delete" onclick="deleteSession(event,'${s.id}')">&#x2715;</button></div>`).join('');
+}
+
+async function newChat() {
+  const res = await fetch(API + '/sessions', { method: 'POST' });
+  currentSession = await res.json();
+  document.getElementById('chatTitle').textContent = 'New Chat';
+  document.getElementById('messages').innerHTML = '';
+  showEmpty();
+  await loadSessions();
+  return currentSession;
+}
+
+function showEmpty() {
+  document.getElementById('messages').innerHTML = `<div class="empty-state" id="emptyState"><div class="empty-icon">&#x1F9E0;</div><div class="empty-title">New Chat</div><div class="empty-sub">Ask anything &mdash; Q&amp;A uses RAG + critic.<br>Coding tasks auto-detect and self-heal.</div><div class="suggestions"><div class="suggestion-pill" onclick="suggest('What is machine learning?')">What is machine learning?</div><div class="suggestion-pill" onclick="suggest('Write a Python fibonacci sequence')">Python fibonacci</div><div class="suggestion-pill" onclick="suggest('How does DNA replication work?')">DNA replication</div><div class="suggestion-pill" onclick="suggest('Write a function to reverse a string')">Reverse a string</div></div></div>`;
+}
+
+async function loadSession(id) {
+  const res = await fetch(API + '/sessions/' + id);
+  const session = await res.json();
+  currentSession = session;
+  document.getElementById('chatTitle').textContent = session.title;
+  const msgs = document.getElementById('messages');
+  msgs.innerHTML = '';
+  if (session.messages && session.messages.length > 0) {
+    session.messages.forEach(m => { if (m.role === 'user') appendUserMessage(m.content); else appendAssistantMessage(m.content, m.meta || {}, false); });
+    msgs.scrollTop = msgs.scrollHeight;
+  } else {
+    showEmpty();
+  }
+  await loadSessions();
+}
+
+async function deleteSession(e, id) {
+  e.stopPropagation();
+  await fetch(API + '/sessions/' + id, { method: 'DELETE' });
+  if (currentSession && currentSession.id === id) { currentSession = null; document.getElementById('chatTitle').textContent = 'Select or start a chat'; document.getElementById('messages').innerHTML = ''; showEmpty(); }
+  await loadSessions();
+}
+
+async function sendMessage() {
+  const text = ta.value.trim();
+  if (!text) return;
+  if (!currentSession) await newChat();
+  const empty = document.getElementById('emptyState');
+  if (empty) empty.remove();
+  ta.value = ''; ta.style.height = 'auto';
+  setLoading(true);
+  appendUserMessage(text);
+  const typingEl = appendTyping();
+  scrollBottom();
+
+  currentAbortCtrl = new AbortController();
+  const signal = currentAbortCtrl.signal;
+
+  try {
+    const res = await fetch(API + '/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ session_id: currentSession.id, message: text }),
+      signal
+    });
+    if (!res.ok) { const e = await res.json(); throw new Error(e.detail || res.statusText); }
+    const d = await res.json();
+    typingEl.remove();
+    appendAssistantMessage(d.content, d.meta, true);
+    await loadSessions();
+  } catch (err) {
+    typingEl.remove();
+    if (err.name === 'AbortError') {
+      appendAssistantMessage('⏹ Generation stopped.', {}, false);
+    } else {
+      appendAssistantMessage('Error: ' + err.message, {}, false);
+    }
+  } finally {
+    currentAbortCtrl = null;
+    setLoading(false);
+    scrollBottom();
+  }
+}
+
+function appendUserMessage(text) {
+  const msgs = document.getElementById('messages');
+  const row = document.createElement('div');
+  row.className = 'msg-row user';
+  row.innerHTML = '<div class="msg-bubble">' + escHtml(text) + '</div>';
+  msgs.appendChild(row);
+}
+
+function appendAssistantMessage(content, meta, animate) {
+  const msgs = document.getElementById('messages');
+  const msgId = 'msg-' + Date.now() + '-' + Math.random().toString(36).slice(2);
+  const type = (meta && meta.type) || 'qa';
+  const time = (meta && meta.total_time_sec) ? meta.total_time_sec + 's' : '';
+  const row = document.createElement('div');
+  row.className = 'msg-row assistant';
+
+  let bubbleContent = escHtml(content);
+  if (type === 'code' && meta) {
+    const status     = meta.status || 'failed';
+    const allAttempts = meta.attempts || [];
+    const totalAtt   = meta.total_attempts || allAttempts.length || 1;
+    const note       = meta.note || '';
+    const statusColor = status === 'success' ? 'var(--pass)' : status === 'partial' ? 'var(--warn)' : 'var(--fail)';
+    const statusLabel = status === 'success' ? '✅ Success' : status === 'partial' ? '⚠️ Partial' : '❌ Failed';
+
+    // Build each attempt card
+    const attemptCards = allAttempts.map((a, i) => {
+      const isLast    = i === allAttempts.length - 1;
+      const aPass     = a.success;
+      const aColor    = aPass ? 'var(--pass)' : 'var(--fail)';
+      const aIcon     = aPass ? '✅' : '❌';
+      const openClass = isLast ? 'open' : '';
+      const aNote     = a.note ? `<div style="font-family:var(--mono);font-size:11px;color:var(--warn);background:rgba(240,176,48,.07);border:1px solid rgba(240,176,48,.2);border-radius:6px;padding:8px 12px;margin-bottom:8px;line-height:1.6">${escHtml(a.note)}</div>` : '';
+      return `
+        <div style="border:1px solid var(--border);border-radius:8px;margin-bottom:8px;overflow:hidden">
+          <button style="width:100%;display:flex;align-items:center;justify-content:space-between;padding:9px 14px;background:var(--bg);border:none;cursor:pointer;font-family:var(--mono);font-size:11px;color:var(--muted);text-align:left"
+                  onclick="this.nextElementSibling.classList.toggle('open')">
+            <span style="color:${aColor};font-weight:700">${aIcon} Attempt #${a.attempt_number}</span>
+            <span style="color:var(--muted);font-size:10px">${escHtml((a.critique||'').slice(0,80))}${(a.critique||'').length>80?'…':''}</span>
+          </button>
+          <div class="attempt-body ${openClass}" style="padding:12px 14px;background:var(--surface2)">
+            ${aNote}
+            <div style="font-family:var(--mono);font-size:10px;color:var(--accent2);text-transform:uppercase;letter-spacing:.07em;margin-bottom:6px">📄 Code</div>
+            <div style="background:#0d0d14;border-radius:6px;padding:10px 12px;font-family:var(--mono);font-size:12px;color:#c8d0e8;white-space:pre;overflow-x:auto;line-height:1.6;margin-bottom:8px">${escHtml(a.code||'')}</div>
+            ${a.stdout ? `<div style="font-family:var(--mono);font-size:10px;color:var(--pass);text-transform:uppercase;letter-spacing:.07em;margin-bottom:5px">⚡ Output</div><div style="background:#0a120a;border:1px solid rgba(34,211,122,.2);border-radius:6px;padding:8px 12px;font-family:var(--mono);font-size:12px;color:var(--pass);white-space:pre-wrap">${escHtml(a.stdout)}</div>` : ''}
+            ${a.stderr ? `<div style="font-family:var(--mono);font-size:10px;color:var(--fail);text-transform:uppercase;letter-spacing:.07em;margin:8px 0 5px">🚨 Error</div><div style="background:#140a0a;border:1px solid rgba(255,94,94,.2);border-radius:6px;padding:8px 12px;font-family:var(--mono);font-size:12px;color:var(--fail);white-space:pre-wrap">${escHtml(a.stderr)}</div>` : ''}
+            ${!a.stdout && !a.stderr ? `<div style="font-family:var(--mono);font-size:11px;color:var(--muted)">(no output)</div>` : ''}
+          </div>
+        </div>`;
+    }).join('');
+
+    bubbleContent =
+      `<div style="display:flex;align-items:center;gap:10px;margin-bottom:12px">` +
+        `<span style="font-family:var(--mono);font-size:11px;color:${statusColor};font-weight:700">${statusLabel}</span>` +
+        `<span style="font-family:var(--mono);font-size:10px;color:var(--muted)">${totalAtt} attempt${totalAtt!==1?'s':''}</span>` +
+      `</div>` +
+      (note ? `<div style="font-family:var(--mono);font-size:11px;color:var(--warn);background:rgba(240,176,48,.07);border:1px solid rgba(240,176,48,.2);border-radius:6px;padding:8px 12px;margin-bottom:12px;line-height:1.6">${escHtml(note)}</div>` : '') +
+      attemptCards;
+  }
+
+  const hasMeta = meta && Object.keys(meta).length > 0;
+  row.innerHTML =
+    '<div class="msg-bubble">' + bubbleContent + '</div>' +
+    '<div class="msg-meta">' +
+      '<span class="intent-tag intent-' + type + '">' + (type === 'code' ? '&#x1F4BB; code' : '&#x1F50D; q&amp;a') + '</span>' +
+      (time ? '<span>' + time + '</span>' : '') +
+    '</div>';
+  msgs.appendChild(row);
+}
+
+
+function appendTyping() {
+  const msgs = document.getElementById('messages');
+  const row = document.createElement('div');
+  row.className = 'msg-row assistant';
+  row.innerHTML = '<div class="typing-indicator"><div class="typing-dots"><span></span><span></span><span></span></div><div class="typing-label">thinking...</div></div>';
+  msgs.appendChild(row);
+  return row;
+}
+
+function scrollBottom() { const m = document.getElementById('messages'); m.scrollTop = m.scrollHeight; }
+function escHtml(s) { return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+function timeAgo(iso) { const d=Date.now()-new Date(iso).getTime(),m=Math.floor(d/60000); if(m<1)return 'just now'; if(m<60)return m+'m ago'; const h=Math.floor(m/60); if(h<24)return h+'h ago'; return Math.floor(h/24)+'d ago'; }
+
+loadSessions();
+</script>
+</body>
+</html>
